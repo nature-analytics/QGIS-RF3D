@@ -45,6 +45,7 @@ from qgis.core import (
     QgsProcessingParameterFile,
     QgsProcessingParameterBoolean,
     QgsProcessingMultiStepFeedback,
+    QgsProcessingContext,
     QgsRasterLayer,
     QgsVectorLayer,
     QgsProject,
@@ -56,11 +57,11 @@ import processing
 import os
 import shutil
 import numpy as np
+from osgeo import gdal
+import xml.parsers.expat as _expat  # nosec B413
 
 try:
     # Preferred: hardened parser against XXE / entity-expansion attacks
-    from defusedxml import defuse_stdlib
-    defuse_stdlib()
     from defusedxml import ElementTree as ET
     from defusedxml.common import EntitiesForbidden
     _HAS_DEFUSEDXML = True
@@ -69,7 +70,6 @@ except ImportError:
     # manually hardened stdlib parser that rejects DOCTYPE/entity declarations.
     # nosec: never used for unguarded parsing, see _parse_xml_safely() below
     import xml.etree.ElementTree as _StdET  # nosec B405
-    import xml.parsers.expat as _expat  # nosec B413
     ET = _StdET
     _HAS_DEFUSEDXML = False
 
@@ -110,6 +110,7 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterVectorLayer('poly', 'Input Vector Data', types=[Qgis.ProcessingSourceType.VectorPolygon, Qgis.ProcessingSourceType.VectorLine]))
         self.addParameter(QgsProcessingParameterField('fields', 'Attributes for rasterization (default: all numeric fields except the ID field)', parentLayerParameterName='poly', allowMultiple=True, type=Qgis.ProcessingFieldParameterDataType.Numeric, defaultToAllFields=True))
         self.addParameter(QgsProcessingParameterFile('output_path', 'Destination folder (will be created if not existent)', behavior=Qgis.ProcessingFileParameterBehavior.Folder, defaultValue=os.path.dirname(QgsProject.instance().fileName())))
+        self.addParameter(QgsProcessingParameterBoolean('output_tif', 'Save output rasters as GeoTIFF (.tif) - if unchecked, the output format is ASCII grid (.asc)', defaultValue=False))
         self.addParameter(QgsProcessingParameterBoolean('load_layers', 'Open results in QGIS', defaultValue=True))
 
     def processAlgorithm(self, parameters, context, model_feedback):
@@ -188,6 +189,8 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
         fields = [field for field in fields if field not in ['fid', 'id']]
 
         output_folder = self.parameterAsFile(parameters, 'output_path', context)
+        output_asc = not self.parameterAsBool(parameters, 'output_tif', context)
+        out_ext = '.asc' if output_asc else '.tif'
         load_layers = self.parameterAsBool(parameters, 'load_layers', context)
         os.makedirs(output_folder, exist_ok = True)
              
@@ -211,20 +214,31 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
         feedback.setCurrentStep(0)
         dtm_dir = Path(dtm_path).parent.resolve()
         out_dir = Path(output_folder).resolve()
+        dtm_ext = os.path.splitext(dtm_path)[1].lower()
+        if dtm_ext not in ('.asc', '.tif', '.tiff', '.vrt'):
+            raise QgsProcessingException(f"❌ ERROR: DEM format '{dtm_ext}' is not supported by Rockyfor3D - please provide an .asc, .tif or .vrt file.")
 
-        if dtm_path.lower().endswith('.vrt'):
-            dtm_out_path = os.path.join(output_folder, 'dem.tif')
-            processing.run('gdal:translate', {
+        if dtm_ext == '.vrt' or (dtm_ext == '.asc') != output_asc:
+            # convert DEM (VRT, or format differs from the chosen output format)
+            dtm_out_path = os.path.join(output_folder, 'dem' + out_ext)
+            # gdalwarp remaps existing NoData cells to nodata_value (gdal_translate -a_nodata would only relabel them)
+            dtm_warped = processing.run('gdal:warpreproject', {
             'INPUT': dtm_path,
+            'SOURCE_CRS': dtm.crs().authid(),
+            'TARGET_CRS': dtm.crs().authid(),
+            'RESAMPLING': 0,
             'NODATA': nodata_value,
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+            }, context=context, feedback=feedback, is_child_algorithm=True)
+            processing.run('gdal:translate', {
+            'INPUT': dtm_warped['OUTPUT'],
+            'NODATA': nodata_value,
+            'EXTRA': '-co DECIMAL_PRECISION=2' if output_asc else '',
             'OUTPUT': dtm_out_path
-            }, context=context, feedback=feedback)
-            feedback.pushInfo(f"DEM converted from VRT to GeoTIFF: {dtm_out_path}")
+            }, context=context, feedback=feedback, is_child_algorithm=True)
+            feedback.pushInfo(f"DEM converted from {dtm_ext} to {out_ext}: {dtm_out_path}")
 
         else:
-            dtm_ext = os.path.splitext(dtm_path)[1].lower()
-            if dtm_ext not in ('.asc', '.tif', '.tiff'):
-                raise QgsProcessingException(f"❌ ERROR: DEM format '{dtm_ext}' is not supported by Rockyfor3D - please provide an .asc, .tif or .vrt file.")
             dtm_out_path = os.path.join(output_folder, 'dem' + dtm_ext)
 
             if dtm_dir != out_dir or os.path.basename(dtm_path) != os.path.basename(dtm_out_path):
@@ -333,12 +347,12 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
                 'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
             }, context=context, feedback=feedback, is_child_algorithm=True)
 
-            # translate to .asc
-            out_path = os.path.join(output_folder, f"{field.lower()}.asc")
+            # translate to .asc / .tif
+            out_path = os.path.join(output_folder, f"{field.lower()}{out_ext}")
             if field.lower() == "rockdensit":
-                out_path = os.path.join(output_folder, "rockdensity.asc")
+                out_path = os.path.join(output_folder, f"rockdensity{out_ext}")
             if field.lower() =="conif_perc":
-                out_path = os.path.join(output_folder, "conif_percent.asc")
+                out_path = os.path.join(output_folder, f"conif_percent{out_ext}")
             
             if os.path.exists(out_path):
                 try:
@@ -351,25 +365,19 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
                 'DATA_TYPE': gdal_type+1,
                 'INPUT': warped['OUTPUT'],
                 'NODATA': nodata_value,
-                'EXTRA':'-co DECIMAL_PRECISION=2',
+                'EXTRA':'-co DECIMAL_PRECISION=2' if output_asc else '',
                 'OUTPUT': out_path
             }, context=context, feedback=feedback, is_child_algorithm=True)
             
             # check if rockdensity cells in the outer 2 rows
             if field.lower().startswith("rockdensit"):
-                rock_raster = QgsRasterLayer(out_path, "rockdensity")
-                if not rock_raster.isValid():
+                rock_raster = gdal.Open(out_path)
+                if rock_raster is None:
                     run_warnings.append(f"⚠️ WARNING: Rockdensity raster is not valid and could not be loaded for edge check.")
                 else:
-                    provider = rock_raster.dataProvider()
-                    extent = rock_raster.extent()
-                    cols = rock_raster.width()
-                    rows = rock_raster.height()
-                    block = provider.block(1, extent, cols, rows)
-
                     # load full raster into numpy
-                    values = np.array([block.value(x, y) for x in range(rows) for y in range(cols)], dtype=int)
-                    values = values.reshape((rows, cols))
+                    values = rock_raster.GetRasterBand(1).ReadAsArray()
+                    rock_raster = None
 
                     # extraction of outer 2 rows + columns
                     top = values[:2, :]  # top 2 rows
@@ -384,9 +392,8 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
                         run_warnings.append(f"⚠️ WARNING: Rockdensity raster contains values in the two outer rows or columns of the raster. Those will not be taken into account in the simulation!")
 
             if load_layers:
-                rl = QgsRasterLayer(out_path, field)
-                if rl.isValid():
-                    QgsProject.instance().addMapLayer(rl)
+                # processing runs in a background thread - let the framework add the layer on completion
+                context.addLayerToLoadOnCompletion(out_path, QgsProcessingContext.LayerDetails(field, context.project(), field))
 
             results[field] = out_path
             

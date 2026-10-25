@@ -8,11 +8,11 @@ name=Rockyfor3D Input Rasters
 qgisMinimumVersion=3.36
 qgisMaximumVersion=4.99
 description=This plugin prepares the input rasters for the Rockyfor3D rockfall simulation model.
-version=1.0
+version=1.1
 author=Alexandra Erbach
 email=a.erbach@posteo.ch
 
-about=Based on a digital elevation model (DEM) and a polygon or line input (terrain / forest / rockfall nets), the algorithm rasterizes the attributes from the vector layer, ensuring alignment of all output rasters with the DEM grid, and the correct output format of all data. The tool includes internal checks for invalid or missing geometries, mismatched coordinate reference systems (CRS), and missing values. In addition, attributes are validated against predefined type and value constraints that reflect the expectations of the Rockyfor3D model.
+about=Based on a digital elevation model (DEM) and a polygon or line input (terrain / forest / rockfall nets), the algorithm rasterizes the attributes from the vector layer, ensuring alignment of all output rasters with the DEM grid, and the correct output format of all data (ESRI ASCII Grid or GeoTIFF). The tool includes internal checks for invalid or missing geometries, mismatched coordinate reference systems (CRS), and missing values. In addition, attributes are validated against predefined type and value constraints that reflect the expectations of the Rockyfor3D model.
 
 tracker=https://github.com/nature-analytics/QGIS-RF3D/issues
 repository=https://github.com/nature-analytics/QGIS-RF3D
@@ -21,11 +21,13 @@ repository=https://github.com/nature-analytics/QGIS-RF3D
 # Recommended items:
 
 hasProcessingProvider=yes
-changelog=1.0
-    - Added support for QGIS 4
-    - DEM inputs as .tif are no longer converted to .asc
-    - Changed authorship (from ecorisQ to Nature Analytics)
-
+changelog=1.1
+    - New option to save all output rasters as GeoTIFF instead of ASCII grid
+    - DEM is only converted if its format differs from the selected output format (otherwise copied)
+    - Faster edge check of the rockdensity raster
+    - Fixed: Crash instead of error message for .vrt files with missing source files
+    - Fixed: Possible QGIS crash when loading the results into the project
+   
 # Tags are comma separated with spaces allowed
 # tags=python, rockfall, Rockyfor3D, Nature Analytics
 
