@@ -2,3 +2,4 @@
 # and the plugins.qgis.org upload zip). Keeps the released plugin package pure Python.
 help/make.bat export-ignore
 scripts/ export-ignore
+plugin_upload.py export-ignore
