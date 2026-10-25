@@ -110,7 +110,7 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterVectorLayer('poly', 'Input Vector Data', types=[Qgis.ProcessingSourceType.VectorPolygon, Qgis.ProcessingSourceType.VectorLine]))
         self.addParameter(QgsProcessingParameterField('fields', 'Attributes for rasterization (default: all numeric fields except the ID field)', parentLayerParameterName='poly', allowMultiple=True, type=Qgis.ProcessingFieldParameterDataType.Numeric, defaultToAllFields=True))
         self.addParameter(QgsProcessingParameterFile('output_path', 'Destination folder (will be created if not existent)', behavior=Qgis.ProcessingFileParameterBehavior.Folder, defaultValue=os.path.dirname(QgsProject.instance().fileName())))
-        self.addParameter(QgsProcessingParameterBoolean('output_tif', 'Save output rasters as GeoTIFF (.tif) - if unchecked, the output format is ASCII grid (.asc)', defaultValue=False))
+        self.addParameter(QgsProcessingParameterBoolean('output_asc', 'Save output rasters as ASCII grid (.asc) - if unchecked, the default output format is GeoTIFF (.tif)', defaultValue=False))
         self.addParameter(QgsProcessingParameterBoolean('load_layers', 'Open results in QGIS', defaultValue=True))
 
     def processAlgorithm(self, parameters, context, model_feedback):
@@ -189,7 +189,7 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
         fields = [field for field in fields if field not in ['fid', 'id']]
 
         output_folder = self.parameterAsFile(parameters, 'output_path', context)
-        output_asc = not self.parameterAsBool(parameters, 'output_tif', context)
+        output_asc = self.parameterAsBool(parameters, 'output_asc', context)
         out_ext = '.asc' if output_asc else '.tif'
         load_layers = self.parameterAsBool(parameters, 'load_layers', context)
         os.makedirs(output_folder, exist_ok = True)

@@ -22,8 +22,7 @@ repository=https://github.com/nature-analytics/QGIS-RF3D
 
 hasProcessingProvider=yes
 changelog=1.1
-    - New option to save all output rasters as GeoTIFF instead of ASCII grid
-    - DEM is only converted if its format differs from the selected output format (otherwise copied)
+    - Output rasters are now saved as GeoTIFF by default, with an option to save them as ASCII grid
     - Faster edge check of the rockdensity raster
     - Fixed: Crash instead of error message for .vrt files with missing source files
     - Fixed: Possible QGIS crash when loading the results into the project
