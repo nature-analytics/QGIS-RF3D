@@ -8,7 +8,7 @@ name=Rockyfor3D Input Rasters
 qgisMinimumVersion=3.36
 qgisMaximumVersion=4.99
 description=This plugin prepares the input rasters for the Rockyfor3D rockfall simulation model.
-version=1.1
+version=1.2
 author=Alexandra Erbach
 email=a.erbach@posteo.ch
 
@@ -21,7 +21,10 @@ repository=https://github.com/nature-analytics/QGIS-RF3D
 # Recommended items:
 
 hasProcessingProvider=yes
-changelog=1.1
+changelog=
+    1.2
+    - Output rasters in .tif format are forced to Float32 (in order to meet the expectations of RF3D)
+    1.1
     - Output rasters are now saved as GeoTIFF by default, with an option to save them as ASCII grid
     - Faster edge check of the rockdensity raster
     - Fixed: Crash instead of error message for .vrt files with missing source files

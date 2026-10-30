@@ -23,7 +23,7 @@
 """
 
 __author__ = 'Alexandra Erbach'
-__date__ = '2026-09-22'
+__date__ = '2026-10-30'
 __copyright__ = '(C) 2026 Nature Analytics'
 
 # This will get replaced with a git SHA1 when you do a git archive
@@ -110,7 +110,7 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterVectorLayer('poly', 'Input Vector Data', types=[Qgis.ProcessingSourceType.VectorPolygon, Qgis.ProcessingSourceType.VectorLine]))
         self.addParameter(QgsProcessingParameterField('fields', 'Attributes for rasterization (default: all numeric fields except the ID field)', parentLayerParameterName='poly', allowMultiple=True, type=Qgis.ProcessingFieldParameterDataType.Numeric, defaultToAllFields=True))
         self.addParameter(QgsProcessingParameterFile('output_path', 'Destination folder (will be created if not existent)', behavior=Qgis.ProcessingFileParameterBehavior.Folder, defaultValue=os.path.dirname(QgsProject.instance().fileName())))
-        self.addParameter(QgsProcessingParameterBoolean('output_asc', 'Save output rasters as ASCII grid (.asc) - if unchecked, the default output format is GeoTIFF (.tif)', defaultValue=False))
+        self.addParameter(QgsProcessingParameterBoolean('output_tif', 'Save output rasters as GeoTIFF (.tif) - if unchecked, they are saved as ASCII grid (.asc)', defaultValue=True))
         self.addParameter(QgsProcessingParameterBoolean('load_layers', 'Open results in QGIS', defaultValue=True))
 
     def processAlgorithm(self, parameters, context, model_feedback):
@@ -189,7 +189,7 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
         fields = [field for field in fields if field not in ['fid', 'id']]
 
         output_folder = self.parameterAsFile(parameters, 'output_path', context)
-        output_asc = self.parameterAsBool(parameters, 'output_asc', context)
+        output_asc = not self.parameterAsBool(parameters, 'output_tif', context)
         out_ext = '.asc' if output_asc else '.tif'
         load_layers = self.parameterAsBool(parameters, 'load_layers', context)
         os.makedirs(output_folder, exist_ok = True)
@@ -218,10 +218,17 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
         if dtm_ext not in ('.asc', '.tif', '.tiff', '.vrt'):
             raise QgsProcessingException(f"❌ ERROR: DEM format '{dtm_ext}' is not supported by Rockyfor3D - please provide an .asc, .tif or .vrt file.")
 
-        if dtm_ext == '.vrt' or (dtm_ext == '.asc') != output_asc:
-            # convert DEM (VRT, or format differs from the chosen output format)
+        # .tif output must always be Float32
+        dtm_not_float32 = False
+        if not output_asc and dtm_ext in ('.tif', '.tiff'):
+            dtm_ds = gdal.Open(dtm_path)
+            dtm_not_float32 = dtm_ds.GetRasterBand(1).DataType != gdal.GDT_Float32
+            dtm_ds = None
+
+        if dtm_ext == '.vrt' or (dtm_ext == '.asc') != output_asc or dtm_not_float32:
+            # convert DEM (VRT, format differs from the chosen output format, or .tif is not Float32)
             dtm_out_path = os.path.join(output_folder, 'dem' + out_ext)
-            # gdalwarp remaps existing NoData cells to nodata_value (gdal_translate -a_nodata would only relabel them)
+            # gdalwarp remaps existing NoData cells to nodata_value
             dtm_warped = processing.run('gdal:warpreproject', {
             'INPUT': dtm_path,
             'SOURCE_CRS': dtm.crs().authid(),
@@ -230,13 +237,24 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
             'NODATA': nodata_value,
             'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
             }, context=context, feedback=feedback, is_child_algorithm=True)
-            processing.run('gdal:translate', {
-            'INPUT': dtm_warped['OUTPUT'],
-            'NODATA': nodata_value,
-            'EXTRA': '-co DECIMAL_PRECISION=2' if output_asc else '',
-            'OUTPUT': dtm_out_path
-            }, context=context, feedback=feedback, is_child_algorithm=True)
-            feedback.pushInfo(f"DEM converted from {dtm_ext} to {out_ext}: {dtm_out_path}")
+
+            dtm_locked = False
+            if os.path.exists(dtm_out_path):
+                try:
+                    os.remove(dtm_out_path)
+                except PermissionError:
+                    run_warnings.append(f"⚠️ WARNING: Output file exists and could not be overwritten: {dtm_out_path}. Please close the raster in QGIS or check file permissions.")
+                    dtm_locked = True
+
+            if not dtm_locked:
+                processing.run('gdal:translate', {
+                'INPUT': dtm_warped['OUTPUT'],
+                'DATA_TYPE': 0 if output_asc else 6,  # .tif always Float32
+                'NODATA': nodata_value,
+                'EXTRA': '-co DECIMAL_PRECISION=2' if output_asc else '',
+                'OUTPUT': dtm_out_path
+                }, context=context, feedback=feedback, is_child_algorithm=True)
+                feedback.pushInfo(f"DEM converted from {dtm_ext} to {out_ext}: {dtm_out_path}")
 
         else:
             dtm_out_path = os.path.join(output_folder, 'dem' + dtm_ext)
@@ -362,7 +380,7 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
                     continue
             
             processing.run('gdal:translate', {
-                'DATA_TYPE': gdal_type+1,
+                'DATA_TYPE': gdal_type+1 if output_asc else 6,  # .tif always Float32
                 'INPUT': warped['OUTPUT'],
                 'NODATA': nodata_value,
                 'EXTRA':'-co DECIMAL_PRECISION=2' if output_asc else '',
