@@ -122,6 +122,7 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
         field_constraints = {
             "rockdensity": {"min": 2000, "max": 3400, "type": "Integer"},
             "rockdensit": {"min": 2000, "max": 3400, "type": "Integer"},
+            "rocdensity": {"min": 2000, "max": 3400, "type": "Integer"},  # old terrain template spelling
             "blshape": {"min": 0, "max": 4, "type": "Integer"},
             "soiltype": {"min": 0, "max": 7, "type": "Integer"},
             "rg10": {"min": 0, "max": 100, "type": "Real"},
@@ -321,11 +322,11 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
                 for feature in layer.getFeatures():
                     value = feature[field]
 
-                    if value is not None and not field.lower().startswith("rockdensit"):
+                    if value is not None and not field.lower().startswith(("rockdensit", "rocdensit")):
                         if (min_val is not None and value < min_val) or (max_val is not None and value > max_val):
                             out_of_range +=1
                     
-                    if value is not None and field.lower().startswith("rockdensit"):
+                    if value is not None and field.lower().startswith(("rockdensit", "rocdensit")):
                         if (min_val is not None and value < min_val and value!=0) or (max_val is not None and value > max_val):
                             out_of_range +=1                                                  
                         
@@ -367,7 +368,7 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
 
             # translate to .asc / .tif
             out_path = os.path.join(output_folder, f"{field.lower()}{out_ext}")
-            if field.lower() == "rockdensit":
+            if field.lower() in ("rockdensit", "rocdensity"):
                 out_path = os.path.join(output_folder, f"rockdensity{out_ext}")
             if field.lower() =="conif_perc":
                 out_path = os.path.join(output_folder, f"conif_percent{out_ext}")
@@ -388,7 +389,7 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
             }, context=context, feedback=feedback, is_child_algorithm=True)
             
             # check if rockdensity cells in the outer 2 rows
-            if field.lower().startswith("rockdensit"):
+            if field.lower().startswith(("rockdensit", "rocdensit")):
                 rock_raster = gdal.Open(out_path)
                 if rock_raster is None:
                     run_warnings.append(f"⚠️ WARNING: Rockdensity raster is not valid and could not be loaded for edge check.")
@@ -411,7 +412,8 @@ class Rockyfor3DInputRastersAlgorithm(QgsProcessingAlgorithm):
 
             if load_layers:
                 # processing runs in a background thread - let the framework add the layer on completion
-                context.addLayerToLoadOnCompletion(out_path, QgsProcessingContext.LayerDetails(field, context.project(), field))
+                layer_name = os.path.splitext(os.path.basename(out_path))[0]
+                context.addLayerToLoadOnCompletion(out_path, QgsProcessingContext.LayerDetails(layer_name, context.project(), layer_name))
 
             results[field] = out_path
             
